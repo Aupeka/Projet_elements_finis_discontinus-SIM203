@@ -241,7 +241,7 @@ int main(int argc, char **argv){
       double b = rk4b[nLoc];
       
       // ======================== (1) UPDATE RHS
-      
+      #pragma omp parallel for
       for(int k=0; k<K; ++k){
         
         double c   = _paramMap[2*k+0];
@@ -265,6 +265,7 @@ int main(int argc, char **argv){
           int k2 = _EToE[k*NFacesTet + f];
           double cP   = _paramMap[2*k2 + 0];
           double rhoP = _paramMap[2*k2 + 1];
+          double param_flux=c/(rhoP*cP+rho*c); //Ce paramètre ne varie pas dans chaque boucle suivante, on factorise donc ce paramètre et on le remplace dans les appels des flux
           
           // Compute penalty terms
           for(int nf=f*Nfp; nf<(f+1)*Nfp; nf++){
@@ -289,10 +290,14 @@ int main(int argc, char **argv){
               double nMdotuP = (nx*uP + ny*vP + nz*wP);
               
               // Penalty terms for interface between two elements
-              s_p_flux[nf] = c / (1./(rhoP*cP) + 1./(rho*c)) * ( (nMdotuP-nMdotuM) - 1./(rhoP*cP) * (pP-pM));
-              s_u_flux[nf] = nx * c/(rhoP*cP+rho*c) * ( (pP-pM) - rhoP*cP * (nMdotuP-nMdotuM) );
-              s_v_flux[nf] = ny * c/(rhoP*cP+rho*c) * ( (pP-pM) - rhoP*cP * (nMdotuP-nMdotuM) );
-              s_w_flux[nf] = nz * c/(rhoP*cP+rho*c) * ( (pP-pM) - rhoP*cP * (nMdotuP-nMdotuM) );
+              double diffnM=(nMdotuP-nMdotuM);
+              double diffp=(pP-pM);
+              
+
+              s_p_flux[nf] = c / (1./(rhoP*cP) + 1./(rho*c)) * ( diffnM - 1./(rhoP*cP) * diffp);
+              s_u_flux[nf] = nx * param_flux * ( diffp - rhoP*cP * diffnM );
+              s_v_flux[nf] = ny * param_flux * ( diffp - rhoP*cP * diffnM );
+              s_w_flux[nf] = nz * param_flux * ( diffp - rhoP*cP * diffnM );
             }
             else{
               // Penalty terms for boundary of the domain
@@ -301,9 +306,9 @@ int main(int argc, char **argv){
               //double tmp = nMdotuM - 1./(rhoP*cP) * pM; // ABC
               
               s_p_flux[nf] = -c / (1./(rhoP*cP) + 1./(rho*c)) * tmp;
-              s_u_flux[nf] = nx * c/(rhoP*cP+rho*c) * tmp;
-              s_v_flux[nf] = ny * c/(rhoP*cP+rho*c) * tmp;
-              s_w_flux[nf] = nz * c/(rhoP*cP+rho*c) * tmp;
+              s_u_flux[nf] = nx * param_flux * tmp;
+              s_v_flux[nf] = ny * param_flux * tmp;
+              s_w_flux[nf] = nz * param_flux * tmp;
             }
           }
         }
@@ -370,7 +375,7 @@ int main(int argc, char **argv){
           _rhsQ[k*Np*Nfields + n*Nfields + 1] = -1.f/rho * dpdx;
           _rhsQ[k*Np*Nfields + n*Nfields + 2] = -1.f/rho * dpdy;
           _rhsQ[k*Np*Nfields + n*Nfields + 3] = -1.f/rho * dpdz;
-        }
+        } 
         
         free(s_p);
         free(s_u);
