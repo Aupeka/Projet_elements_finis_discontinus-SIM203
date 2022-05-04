@@ -1,5 +1,11 @@
 #include "gmsh.h"
 #include "dg.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <time.h>
+#include <omp.h>
+#include <mkl.h>
 
 int main(int argc, char **argv){
   
@@ -55,7 +61,7 @@ int main(int argc, char **argv){
   int *_EToF = NULL;   // Element-to-face connectivity array [K,NFacesTet]
   
   // Load mesh (output: K, _VX, _VY, _VZ, _ETag, _EMsh, _EToV)
-  char meshName[] = "mesh.msh";
+  char meshName[] = "mesh3.msh";
   loadMeshGmsh(meshName, &K, &_VX, &_VY, &_VZ, &_ETag, &_EMsh, &_EToV);
   
   // Build connectivity arrays (output: _EToE, _EToF)
@@ -64,6 +70,7 @@ int main(int argc, char **argv){
   
   // ======================================================================
   // 3] Build Discrete Representation + Compute Connectivity Node-to-Node
+
   // ======================================================================
   
   // Parameters
@@ -230,11 +237,10 @@ int main(int argc, char **argv){
   // ======================================================================
   // 7] RUN
   // ======================================================================
-  
-  // Global time iteration
-  for(int nGlo=0; nGlo<Nsteps; ++nGlo){
-    double runTime = nGlo*dt;  // Time at the beginning of the step
-    
+  unsigned MKL_INT64 timeBegin;
+  mkl_get_cpu_clocks(&timeBegin);
+  for(int nGlo=0; nGlo<Nsteps; ++nGlo){ 
+    double runTime = nGlo*dt;
     // Local time iteration (5 sub-iteration for low-storage RK44)
     for(int nLoc=0; nLoc<5; ++nLoc){
       double a = rk4a[nLoc];
@@ -253,7 +259,7 @@ int main(int argc, char **argv){
         double *s_u_flux = malloc(Nfp*NFacesTet*sizeof(double));
         double *s_v_flux = malloc(Nfp*NFacesTet*sizeof(double));
         double *s_w_flux = malloc(Nfp*NFacesTet*sizeof(double));
-        
+        //#pragma omp parallel for        Pas efficace du tout, on préfère mettre la parallélisation en boucle externe
         for(int f=0; f<NFacesTet; f++){
           
           // Fetch normal
@@ -268,36 +274,39 @@ int main(int argc, char **argv){
           double param_flux=c/(rhoP*cP+rho*c); //Ce paramètre ne varie pas dans chaque boucle suivante, on factorise donc ce paramètre et on le remplace dans les appels des flux
           
           // Compute penalty terms
+          #pragma ivdep
+          {
           for(int nf=f*Nfp; nf<(f+1)*Nfp; nf++){
             
             int n1 = _Fmask[nf];                // Index of node in current element
             int n2 = _mapP[nf + k*NFacesTet*Nfp];  // Index of node in neighbor element
-            
+            int coord3 =k*Np*Nfields + n1*Nfields;
+            int coord4 =k2*Np*Nfields + n2*Nfields;
             // Load values 'minus' corresponding to current element
-            double pM = _valQ[k*Np*Nfields + n1*Nfields + 0];
-            double uM = _valQ[k*Np*Nfields + n1*Nfields + 1];
-            double vM = _valQ[k*Np*Nfields + n1*Nfields + 2];
-            double wM = _valQ[k*Np*Nfields + n1*Nfields + 3];
+            double pM = _valQ[coord3 + 0];
+            double uM = _valQ[coord3 + 1];
+            double vM = _valQ[coord3 + 2];
+            double wM = _valQ[coord3 + 3];
             double nMdotuM = (nx*uM + ny*vM + nz*wM);
             
             if(n2 >= 0){ // ... if there is a neighbor element ...
               
               // Load values 'plus' corresponding to neighbor element
-              double pP = _valQ[k2*Np*Nfields + n2*Nfields + 0];
-              double uP = _valQ[k2*Np*Nfields + n2*Nfields + 1];
-              double vP = _valQ[k2*Np*Nfields + n2*Nfields + 2];
-              double wP = _valQ[k2*Np*Nfields + n2*Nfields + 3];
+              double pP = _valQ[coord4 + 0];
+              double uP = _valQ[coord4 + 1];
+              double vP = _valQ[coord4 + 2];
+              double wP = _valQ[coord4 + 3];
               double nMdotuP = (nx*uP + ny*vP + nz*wP);
               
               // Penalty terms for interface between two elements
               double diffnM=(nMdotuP-nMdotuM);
               double diffp=(pP-pM);
-              
+              double coeff=( diffp - rhoP*cP * diffnM );
 
               s_p_flux[nf] = c / (1./(rhoP*cP) + 1./(rho*c)) * ( diffnM - 1./(rhoP*cP) * diffp);
-              s_u_flux[nf] = nx * param_flux * ( diffp - rhoP*cP * diffnM );
-              s_v_flux[nf] = ny * param_flux * ( diffp - rhoP*cP * diffnM );
-              s_w_flux[nf] = nz * param_flux * ( diffp - rhoP*cP * diffnM );
+              s_u_flux[nf] = nx * param_flux * coeff;
+              s_v_flux[nf] = ny * param_flux * coeff;
+              s_w_flux[nf] = nz * param_flux * coeff;
             }
             else{
               // Penalty terms for boundary of the domain
@@ -310,6 +319,7 @@ int main(int argc, char **argv){
               s_v_flux[nf] = ny * param_flux * tmp;
               s_w_flux[nf] = nz * param_flux * tmp;
             }
+          }
           }
         }
         
@@ -332,20 +342,25 @@ int main(int argc, char **argv){
         double *s_v = malloc(Np*sizeof(double));
         double *s_w = malloc(Np*sizeof(double));
         for(int n=0; n<Np; ++n){
-          s_p[n] = _valQ[k*Np*Nfields + n*Nfields + 0];
-          s_u[n] = _valQ[k*Np*Nfields + n*Nfields + 1];
-          s_v[n] = _valQ[k*Np*Nfields + n*Nfields + 2];
-          s_w[n] = _valQ[k*Np*Nfields + n*Nfields + 3];
+          int coord1 =k*Np*Nfields + n*Nfields;
+          s_p[n] = _valQ[coord1];
+          s_u[n] = _valQ[coord1 + 1];
+          s_v[n] = _valQ[coord1 + 2];
+          s_w[n] = _valQ[coord1 + 3];
         }
+        
         
         // Compute mat-vec product for surface term
         for(int n=0; n<Np; ++n){
+          int coord2=k*Np*Nfields + n*Nfields;
           double dpdr = 0, dpds = 0, dpdt = 0;
           double dudr = 0, duds = 0, dudt = 0;
           double dvdr = 0, dvds = 0, dvdt = 0;
           double dwdr = 0, dwds = 0, dwdt = 0;
+          #pragma ivdep
+          {
           for(int m = 0; m < Np; ++m){
-            double Dr = _Dr[n + m*Np];
+            double Dr = _Dr[n + m*Np]; //Produit scalaire
             dpdr += Dr * s_p[m];
             dudr += Dr * s_u[m];
             dvdr += Dr * s_v[m];
@@ -361,6 +376,8 @@ int main(int argc, char **argv){
             dvdt += Dt * s_v[m];
             dwdt += Dt * s_w[m];
           }
+          }
+          
           
           double dpdx = rx*dpdr + sx*dpds + tx*dpdt;
           double dpdy = ry*dpdr + sy*dpds + ty*dpdt;
@@ -371,12 +388,11 @@ int main(int argc, char **argv){
           double divU = dudx + dvdy + dwdz;
           
           // Compute RHS (only part corresponding to volume terms)
-          _rhsQ[k*Np*Nfields + n*Nfields + 0] = -c*c*rho * divU;
-          _rhsQ[k*Np*Nfields + n*Nfields + 1] = -1.f/rho * dpdx;
-          _rhsQ[k*Np*Nfields + n*Nfields + 2] = -1.f/rho * dpdy;
-          _rhsQ[k*Np*Nfields + n*Nfields + 3] = -1.f/rho * dpdz;
+          _rhsQ[coord2] = -c*c*rho * divU;
+          _rhsQ[coord2 + 1] = -1.f/rho * dpdx;
+          _rhsQ[coord2 + 2] = -1.f/rho * dpdy;
+          _rhsQ[coord2 + 3] = -1.f/rho * dpdz;
         } 
-        
         free(s_p);
         free(s_u);
         free(s_v);
@@ -384,15 +400,17 @@ int main(int argc, char **argv){
         
         // ======================== (1.3) COMPUTING SURFACE TERMS
         
-        for(int n=0; n<Np; ++n){
-          
+        for(int n=0; n<Np; n++){
+          int coord=k*Np*Nfields + n*Nfields;
           for(int f=0; f<NFacesTet; f++){
-            
+            double Fscale = _Fscale[k*NFacesTet + f];
             // Compute mat-vec product for surface term
             double p_lift = 0.;
             double u_lift = 0.;
             double v_lift = 0.;
             double w_lift = 0.;
+            #pragma ivdep
+            {
             for(int m=f*Nfp; m<(f+1)*Nfp; m++){
               double tmp = _LIFT[n*NFacesTet*Nfp + m];
               p_lift += tmp*s_p_flux[m];
@@ -400,15 +418,14 @@ int main(int argc, char **argv){
               v_lift += tmp*s_v_flux[m];
               w_lift += tmp*s_w_flux[m];
             }
+            }
             
             // Load geometric factor
-            double Fscale = _Fscale[k*NFacesTet + f];
-            
             // Update RHS (with part corresponding to surface terms)
-            _rhsQ[k*Np*Nfields + n*Nfields + 0] -= p_lift * Fscale;
-            _rhsQ[k*Np*Nfields + n*Nfields + 1] -= u_lift * Fscale;
-            _rhsQ[k*Np*Nfields + n*Nfields + 2] -= v_lift * Fscale;
-            _rhsQ[k*Np*Nfields + n*Nfields + 3] -= w_lift * Fscale;
+            _rhsQ[coord] -= p_lift * Fscale;
+            _rhsQ[coord + 1] -= u_lift * Fscale;
+            _rhsQ[coord + 2] -= v_lift * Fscale;
+            _rhsQ[coord + 3] -= w_lift * Fscale;
           }
         }
         
@@ -422,15 +439,18 @@ int main(int argc, char **argv){
       
       for(int k=0; k<K; ++k){
         for(int n=0; n<Np; ++n){
+          #pragma ivdep
+          {
           for(int iField=0; iField<Nfields; ++iField){
             int id = k*Np*Nfields + n*Nfields + iField;
             _resQ[id] = a*_resQ[id] + dt*_rhsQ[id];
-            _valQ[id] = _valQ[id] + b*_resQ[id];
+            _valQ[id] +=  b*_resQ[id];
+          }
           }
         }
       }
     }
-    
+   
     // Export solution
     if((iOutputGmsh > 0) && ((nGlo+1) % iOutputGmsh == 0))
       exportSolGmsh(_valQ, K, N, Np, Nfields, _r,_s,_t, _EMsh, nGlo+1, runTime+dt);
@@ -440,7 +460,11 @@ int main(int argc, char **argv){
   if(iOutputGmsh > 0)
     exportSolGmsh(_valQ, K, N, Np, Nfields, _r,_s,_t, _EMsh, Nsteps, Nsteps*dt);
   
-  
+
+  unsigned MKL_INT64 timeEnd;
+  mkl_get_cpu_clocks(&timeEnd);
+  double timeTotal4 = (double)(timeEnd-timeBegin)/mkl_get_clocks_frequency()/1e9;
+  printf("%f\n",timeTotal4);
   // ======================================================================
   // 8] Deallocation
   // ======================================================================
