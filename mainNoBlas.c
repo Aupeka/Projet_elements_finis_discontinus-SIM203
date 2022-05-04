@@ -61,7 +61,7 @@ int main(int argc, char **argv){
   int *_EToF = NULL;   // Element-to-face connectivity array [K,NFacesTet]
   
   // Load mesh (output: K, _VX, _VY, _VZ, _ETag, _EMsh, _EToV)
-  char meshName[] = "mesh3.msh";
+  char meshName[] = "mesh1.msh";
   loadMeshGmsh(meshName, &K, &_VX, &_VY, &_VZ, &_ETag, &_EMsh, &_EToV);
   
   // Build connectivity arrays (output: _EToE, _EToF)
@@ -239,15 +239,19 @@ int main(int argc, char **argv){
   // ======================================================================
   unsigned MKL_INT64 timeBegin;
   mkl_get_cpu_clocks(&timeBegin);
+  
   for(int nGlo=0; nGlo<Nsteps; ++nGlo){ 
     double runTime = nGlo*dt;
     // Local time iteration (5 sub-iteration for low-storage RK44)
+    
     for(int nLoc=0; nLoc<5; ++nLoc){
       double a = rk4a[nLoc];
       double b = rk4b[nLoc];
       
       // ======================== (1) UPDATE RHS
-      #pragma omp parallel for
+      
+      //#pragma omp parallel for
+      
       for(int k=0; k<K; ++k){
         
         double c   = _paramMap[2*k+0];
@@ -259,7 +263,9 @@ int main(int argc, char **argv){
         double *s_u_flux = malloc(Nfp*NFacesTet*sizeof(double));
         double *s_v_flux = malloc(Nfp*NFacesTet*sizeof(double));
         double *s_w_flux = malloc(Nfp*NFacesTet*sizeof(double));
+
         //#pragma omp parallel for        Pas efficace du tout, on préfère mettre la parallélisation en boucle externe
+        
         for(int f=0; f<NFacesTet; f++){
           
           // Fetch normal
@@ -274,8 +280,8 @@ int main(int argc, char **argv){
           double param_flux=c/(rhoP*cP+rho*c); //Ce paramètre ne varie pas dans chaque boucle suivante, on factorise donc ce paramètre et on le remplace dans les appels des flux
           
           // Compute penalty terms
-          #pragma ivdep
-          {
+          /*#pragma ivdep
+          { **/
           for(int nf=f*Nfp; nf<(f+1)*Nfp; nf++){
             
             int n1 = _Fmask[nf];                // Index of node in current element
@@ -296,32 +302,33 @@ int main(int argc, char **argv){
               double uP = _valQ[coord4 + 1];
               double vP = _valQ[coord4 + 2];
               double wP = _valQ[coord4 + 3];
+
               double nMdotuP = (nx*uP + ny*vP + nz*wP);
               
               // Penalty terms for interface between two elements
               double diffnM=(nMdotuP-nMdotuM);
               double diffp=(pP-pM);
-              double coeff=( diffp - rhoP*cP * diffnM );
+              double coeff=( diffp - rhoP*cP * diffnM ) * param_flux;
 
               s_p_flux[nf] = c / (1./(rhoP*cP) + 1./(rho*c)) * ( diffnM - 1./(rhoP*cP) * diffp);
-              s_u_flux[nf] = nx * param_flux * coeff;
-              s_v_flux[nf] = ny * param_flux * coeff;
-              s_w_flux[nf] = nz * param_flux * coeff;
+              s_u_flux[nf] = nx  * coeff;
+              s_v_flux[nf] = ny  * coeff;
+              s_w_flux[nf] = nz  * coeff;
             }
             else{
               // Penalty terms for boundary of the domain
-              double tmp = -2./(rhoP*cP) * pM;            // Homogeneous Dirichlet on 'p'
-              //double tmp = 2*nMdotuM;                   // Homogeneous Dirichlet on 'u'
-              //double tmp = nMdotuM - 1./(rhoP*cP) * pM; // ABC
+              double tmp = (-2./(rhoP*cP) * pM)* param_flux;            // Homogeneous Dirichlet on 'p'
+              //double tmp = 2*nMdotuM* param_flux;                   // Homogeneous Dirichlet on 'u'
+              //double tmp = (nMdotuM - 1./(rhoP*cP) * pM)* param_flux; // ABC
               
               s_p_flux[nf] = -c / (1./(rhoP*cP) + 1./(rho*c)) * tmp;
-              s_u_flux[nf] = nx * param_flux * tmp;
-              s_v_flux[nf] = ny * param_flux * tmp;
-              s_w_flux[nf] = nz * param_flux * tmp;
+              s_u_flux[nf] = nx  * tmp;
+              s_v_flux[nf] = ny * tmp;
+              s_w_flux[nf] = nz * tmp;
             }
           }
           }
-        }
+        //}
         
         // ======================== (1.2) COMPUTING VOLUME TERMS
         
@@ -341,6 +348,7 @@ int main(int argc, char **argv){
         double *s_u = malloc(Np*sizeof(double));
         double *s_v = malloc(Np*sizeof(double));
         double *s_w = malloc(Np*sizeof(double));
+
         for(int n=0; n<Np; ++n){
           int coord1 =k*Np*Nfields + n*Nfields;
           s_p[n] = _valQ[coord1];
@@ -357,7 +365,7 @@ int main(int argc, char **argv){
           double dudr = 0, duds = 0, dudt = 0;
           double dvdr = 0, dvds = 0, dvdt = 0;
           double dwdr = 0, dwds = 0, dwdt = 0;
-          #pragma ivdep
+          //#pragma ivdep
           {
           for(int m = 0; m < Np; ++m){
             double Dr = _Dr[n + m*Np]; //Produit scalaire
@@ -387,7 +395,7 @@ int main(int argc, char **argv){
           double dwdz = rz*dwdr + sz*dwds + tz*dwdt;
           double divU = dudx + dvdy + dwdz;
           
-          // Compute RHS (only part corresponding to volume terms)
+          // Compute RHS (only part corresponding to volume terms)          
           _rhsQ[coord2] = -c*c*rho * divU;
           _rhsQ[coord2 + 1] = -1.f/rho * dpdx;
           _rhsQ[coord2 + 2] = -1.f/rho * dpdy;
@@ -409,8 +417,8 @@ int main(int argc, char **argv){
             double u_lift = 0.;
             double v_lift = 0.;
             double w_lift = 0.;
-            #pragma ivdep
-            {
+            /*#pragma ivdep
+            {*/
             for(int m=f*Nfp; m<(f+1)*Nfp; m++){
               double tmp = _LIFT[n*NFacesTet*Nfp + m];
               p_lift += tmp*s_p_flux[m];
@@ -418,7 +426,7 @@ int main(int argc, char **argv){
               v_lift += tmp*s_v_flux[m];
               w_lift += tmp*s_w_flux[m];
             }
-            }
+            //}
             
             // Load geometric factor
             // Update RHS (with part corresponding to surface terms)
@@ -439,14 +447,14 @@ int main(int argc, char **argv){
       
       for(int k=0; k<K; ++k){
         for(int n=0; n<Np; ++n){
-          #pragma ivdep
-          {
+          /*#pragma ivdep
+          {*/
           for(int iField=0; iField<Nfields; ++iField){
             int id = k*Np*Nfields + n*Nfields + iField;
             _resQ[id] = a*_resQ[id] + dt*_rhsQ[id];
             _valQ[id] +=  b*_resQ[id];
           }
-          }
+          //}
         }
       }
     }
@@ -460,11 +468,14 @@ int main(int argc, char **argv){
   if(iOutputGmsh > 0)
     exportSolGmsh(_valQ, K, N, Np, Nfields, _r,_s,_t, _EMsh, Nsteps, Nsteps*dt);
   
-
+  //Fin du calcul du temps
   unsigned MKL_INT64 timeEnd;
   mkl_get_cpu_clocks(&timeEnd);
   double timeTotal4 = (double)(timeEnd-timeBegin)/mkl_get_clocks_frequency()/1e9;
-  printf("%f\n",timeTotal4);
+  
+  //Affichage
+  printf("Le code a tourné pendant %f secondes\n",timeTotal4);
+  
   // ======================================================================
   // 8] Deallocation
   // ======================================================================
