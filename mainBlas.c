@@ -354,37 +354,36 @@ int main(int argc, char **argv){
         
         // Compute mat-vec product for surface term
           enum CBLAS_LAYOUT Order = CblasRowMajor;
-          enum CBLAS_TRANSPOSE transA = CblasNoTrans;
+          enum CBLAS_TRANSPOSE transA = CblasTrans;
           int M = Np;
           int N = Np;
-          int K = Np;
           int lda = Np;
           double* dpdr=malloc(Np*sizeof(double));
-          cblas_dgemv(Order,transA,M,N,1.,_Dr,lda,s_p,Np,0.,dpdr,Np);
+          cblas_dgemv(Order,transA,M,N,1.,_Dr,lda,s_p,1,0.,dpdr,1);
           double* dudr=malloc(Np*sizeof(double));
-          cblas_dgemv(Order,transA,M,N,1.,_Dr,lda,s_u,Np,0.,dudr,Np);
+          cblas_dgemv(Order,transA,M,N,1.,_Dr,lda,s_u,1,0.,dudr,1);
           double* dvdr=malloc(Np*sizeof(double));
-          cblas_dgemv(Order,transA,M,N,1.,_Dr,lda,s_v,Np,0.,dvdr,Np);
+          cblas_dgemv(Order,transA,M,N,1.,_Dr,lda,s_v,1,0.,dvdr,1);
           double* dwdr=malloc(Np*sizeof(double));
-          cblas_dgemv(Order,transA,M,N,1.,_Dr,lda,s_w,Np,0.,dwdr,Np);
+          cblas_dgemv(Order,transA,M,N,1.,_Dr,lda,s_w,1,0.,dwdr,1);
 
           double* dpds=malloc(Np*sizeof(double));
-          cblas_dgemv(Order,transA,M,N,1.,_Ds,lda,s_p,Np,0.,dpds,Np);
+          cblas_dgemv(Order,transA,M,N,1.,_Ds,lda,s_p,1,0.,dpds,1);
           double* duds=malloc(Np*sizeof(double));
-          cblas_dgemv(Order,transA,M,N,1.,_Ds,lda,s_u,Np,0.,duds,Np);
+          cblas_dgemv(Order,transA,M,N,1.,_Ds,lda,s_u,1,0.,duds,1);
           double* dvds=malloc(Np*sizeof(double));
-          cblas_dgemv(Order,transA,M,N,1.,_Ds,lda,s_v,Np,0.,dvds,Np);
+          cblas_dgemv(Order,transA,M,N,1.,_Ds,lda,s_v,1,0.,dvds,1);
           double* dwds=malloc(Np*sizeof(double));
-          cblas_dgemv(Order,transA,M,N,1.,_Ds,lda,s_w,Np,0.,dwds,Np);
+          cblas_dgemv(Order,transA,M,N,1.,_Ds,lda,s_w,1,0.,dwds,1);
 
           double* dpdt=malloc(Np*sizeof(double));
-          cblas_dgemv(Order,transA,M,N,1.,_Dt,lda,s_p,Np,0.,dpdt,Np);
+          cblas_dgemv(Order,transA,M,N,1.,_Dt,lda,s_p,1,0.,dpdt,1);
           double* dudt=malloc(Np*sizeof(double));
-          cblas_dgemv(Order,transA,M,N,1.,_Dt,lda,s_u,Np,0.,dudt,Np);
+          cblas_dgemv(Order,transA,M,N,1.,_Dt,lda,s_u,1,0.,dudt,1);
           double* dvdt=malloc(Np*sizeof(double));
-          cblas_dgemv(Order,transA,M,N,1.,_Dt,lda,s_v,Np,0.,dvdt,Np);
+          cblas_dgemv(Order,transA,M,N,1.,_Dt,lda,s_v,1,0.,dvdt,1);
           double* dwdt=malloc(Np*sizeof(double));
-          cblas_dgemv(Order,transA,M,N,1.,_Dt,lda,s_w,Np,0.,dwdt,Np);
+          cblas_dgemv(Order,transA,M,N,1.,_Dt,lda,s_w,1,0.,dwdt,1);
 
           for(int n=0; n<Np; ++n){
           int coord2=k*Np*Nfields + n*Nfields;
