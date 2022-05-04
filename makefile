@@ -1,7 +1,7 @@
 #---[ Compiler & Flags]—————————————————
 
 compiler = icc
-flags = -std=c99 -O3 -mkl -qopenmp 
+flags = -std=c99 -O3 -mkl -qopenmp //-qopt-report-annotate=html
 links = 
 
 #---[ Makefile ]----------------------------------
