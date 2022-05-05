@@ -61,7 +61,7 @@ int main(int argc, char **argv){
   int *_EToF = NULL;   // Element-to-face connectivity array [K,NFacesTet]
   
   // Load mesh (output: K, _VX, _VY, _VZ, _ETag, _EMsh, _EToV)
-  char meshName[] = "mesh3.msh";
+  char meshName[] = "mesh.msh";
   loadMeshGmsh(meshName, &K, &_VX, &_VY, &_VZ, &_ETag, &_EMsh, &_EToV);
   
   // Build connectivity arrays (output: _EToE, _EToF)
@@ -422,34 +422,28 @@ int main(int argc, char **argv){
         
         // ======================== (1.3) COMPUTING SURFACE TERMS
         
-        for(int n=0; n<Np; ++n){
-          int coord=k*Np*Nfields + n*Nfields;
-          for(int f=0; f<NFacesTet; f++){
-            double Fscale = _Fscale[k*NFacesTet + f];
-            // Compute mat-vec product for surface term
-            double p_lift = 0.;
-            double u_lift = 0.;
-            double v_lift = 0.;
-            double w_lift = 0.;
-            #pragma ivdep
-            {
-            for(int m=f*Nfp; m<(f+1)*Nfp; m++){
-              double tmp = _LIFT[n*NFacesTet*Nfp + m];
-              p_lift += tmp*s_p_flux[m];
-              u_lift += tmp*s_u_flux[m];
-              v_lift += tmp*s_v_flux[m];
-              w_lift += tmp*s_w_flux[m];
-            }
-            }
-            
-            // Load geometric factor
-            // Update RHS (with part corresponding to surface terms)
-            _rhsQ[coord + 0] -= p_lift * Fscale;
-            _rhsQ[coord + 1] -= u_lift * Fscale;
-            _rhsQ[coord + 2] -= v_lift * Fscale;
-            _rhsQ[coord + 3] -= w_lift * Fscale;
-          }
+        
+        for(int f=0; f<NFacesTet; f++){
+          double Fscale = _Fscale[k*NFacesTet + f];
+          
+          double* flux =malloc(4*Nfp*NFacesTet*sizeof(double));
+
+        for (int i=0;i<Nfp*NFacesTet;++i)
+        {
+          flux[4*i] = s_p_flux[i];
+          flux[4*i+1] = s_u_flux[i];
+          flux[4*i+2] = s_v_flux[i];
+          flux[4*i+3] = s_w_flux[i];
         }
+
+        double* LIFT =_LIFT +f*Nfp;
+        double* B =flux + 4*f*Nfp;
+        double* C=_rhsQ + k*Np*Nfields;
+
+        cblas_dgemm(CblasRowMajor,CblasNoTrans,CblasNoTrans,Np,4,Nfp,-Fscale,LIFT,Nfp*NFacesTet,B,4,1.,C,4);
+        free(flux);
+        }
+        
         
         free(s_p_flux);
         free(s_u_flux);
